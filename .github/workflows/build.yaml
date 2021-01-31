@@ -1,0 +1,30 @@
+# Copyright 2021 Matthew Brecknell <matthew@brecknell.net>
+# SPDX-License-Identifier: Apache-2.0
+
+name: Caddy docker image build
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '7 17 * * *'
+  workflow_dispatch:
+
+jobs:
+  caddy-docker-image-build:
+    name: Build Caddy Docker images
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.CR_PAT }}
+      - name: Build and push images
+        run: ./build.sh
