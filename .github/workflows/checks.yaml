@@ -1,0 +1,18 @@
+# Copyright 2021 Matthew Brecknell <matthew@brecknell.net>
+# SPDX-License-Identifier: Apache-2.0
+
+name: Checks
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Checks
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+      - name: REUSE license compliance check
+        uses: fsfe/reuse-action@v1
