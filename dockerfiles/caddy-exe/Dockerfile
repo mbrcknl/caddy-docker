@@ -13,7 +13,3 @@ RUN xcaddy build \
     --output /go/bin/caddy \
     --with github.com/mbrcknl/caddy_yaml_adapter \
     --with github.com/caddy-dns/cloudflare
-
-FROM scratch
-
-COPY --from=caddy_builder /go/bin/caddy /caddy
