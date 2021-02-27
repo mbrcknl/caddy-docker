@@ -89,6 +89,9 @@ if $first_build_base || $rebuild_base || $rebuild_apk; then
     --label org.opencontainers.image.source=https://github.com/mbrcknl/caddy-docker \
     --label org.opencontainers.image.revision="$current_revision" \
     --label org.opencontainers.image.description="Alpine Linux with extra packages for use by the Caddy webserver" \
+    --label org.brecknell.github.actions.run.id="$GITHUB_RUN_ID" \
+    --label org.brecknell.github.actions.run.number="$GITHUB_RUN_NUMBER" \
+    --label org.brecknell.version.alpine="$alpine_version" \
     dockerfiles/caddy-base
   docker push $registry/caddy-base
 fi
@@ -148,6 +151,11 @@ if $first_build_base || $first_build_caddy || $rebuild_base || $rebuild_apk || $
     --label org.opencontainers.image.source=https://github.com/mbrcknl/caddy-docker \
     --label org.opencontainers.image.revision="$current_revision" \
     --label org.opencontainers.image.description="A custom build of the Caddy webserver" \
+    --label org.brecknell.github.actions.run.id="$GITHUB_RUN_ID" \
+    --label org.brecknell.github.actions.run.number="$GITHUB_RUN_NUMBER" \
+    --label org.brecknell.version.alpine="$alpine_version" \
+    --label org.brecknell.version.golang="$golang_version" \
+    --label org.brecknell.version.caddy="$caddy_version" \
     dockerfiles/caddy
   docker push $registry/caddy
 
