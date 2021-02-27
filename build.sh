@@ -13,6 +13,8 @@ export XCADDY_SKIP_CLEANUP=1
 create_date=$(date -u "+%FT%TZ")
 current_revision=$(git rev-parse --verify HEAD)
 
+force_build_base=false
+force_build_caddy=false
 first_build_base=false
 first_build_caddy=false
 rebuild_base=false
@@ -24,7 +26,25 @@ trace() {
   echo "build.sh: $*"
 }
 
-trace "pulling alpine and $registry/caddy-base"
+if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+  case "$INPUT_FORCE_BUILD_IMAGE" in
+  "caddy")
+    trace "will force-build caddy"
+    force_build_caddy=true
+    ;;
+  "caddy-base")
+    trace "will force-build caddy-base"
+    force_build_base=true
+    ;;
+  "")
+    ;;
+  *)
+    trace "force-build-image bad input: $INPUT_FORCE_BUILD_IMAGE"
+    exit 1
+  esac
+fi
+
+trace "pulling base images"
 
 get_alpine_version() {
   local image="$1"
@@ -35,54 +55,60 @@ docker pull --quiet alpine
 alpine_version="$(get_alpine_version alpine)"
 trace "Alpine Linux version $alpine_version"
 
-if docker pull --quiet $registry/caddy-base; then
-  old_alpine_version="$(get_alpine_version $registry/caddy-base)"
-else
-  trace "$registry/caddy-base not found"
-  first_build_base=true
-fi
+if ! $force_build_base; then
+  if docker pull --quiet $registry/caddy-base; then
+    old_alpine_version="$(get_alpine_version $registry/caddy-base)"
+  else
+    trace "$registry/caddy-base not found"
+    first_build_base=true
+  fi
 
-# Does the base Alpine image need updating?
+  # Does the base Alpine image need updating?
 
-layers() {
-  local image="$1"
-  docker image inspect "$image" | jq -r '.[0].RootFS.Layers[]' | sort
-}
+  layers() {
+    local image="$1"
+    docker image inspect "$image" | jq -r '.[0].RootFS.Layers[]' | sort
+  }
 
-fresh_base_layers() {
-  local base_image derived_image base_layers derived_layers
-  base_image="$1"
-  derived_image="$2"
-  # Fetch layers for the two images.
-  # We don't inline these into the test below, because we want to see errors.
-  base_layers="$(layers "$base_image")"
-  derived_layers="$(layers "$derived_image")"
-  # Are there any layers in the base image that are not in the derived image?
-  [ -n "$(comm -23 <(echo "$base_layers") <(echo "$derived_layers"))" ]
-}
+  fresh_base_layers() {
+    local base_image derived_image base_layers derived_layers
+    base_image="$1"
+    derived_image="$2"
+    # Fetch layers for the two images.
+    # We don't inline these into the test below, because we want to see errors.
+    base_layers="$(layers "$base_image")"
+    derived_layers="$(layers "$derived_image")"
+    # Are there any layers in the base image that are not in the derived image?
+    [ -n "$(comm -23 <(echo "$base_layers") <(echo "$derived_layers"))" ]
+  }
 
-test_apk_updates() {
-  trace "testing whether $registry/caddy-base needs apk updates"
-  docker run --rm -i $registry/caddy-base /bin/sh -c \
-    'apk update \
-     && (apk list --installed | sort > /tmp/1) \
-     && apk upgrade \
-     && (apk list --installed | sort > /tmp/2) \
-     && diff -U 0 -L "old packages" /tmp/1 -L "new packages" /tmp/2'
-}
+  test_apk_updates() {
+    trace "testing whether $registry/caddy-base needs apk updates"
+    docker run --rm -i $registry/caddy-base /bin/sh -c \
+      'apk update \
+       && (apk list --installed | sort > /tmp/1) \
+       && apk upgrade \
+       && (apk list --installed | sort > /tmp/2) \
+       && diff -U 0 -L "old packages" /tmp/1 -L "new packages" /tmp/2'
+  }
 
-if ! $first_build_base; then
-  trace "testing whether there is a new alpine image"
-  if fresh_base_layers alpine $registry/caddy-base; then
-    trace "there is a new alpine image (old=$old_alpine_version, new=$alpine_version)"
-    rebuild_base=true
-  elif ! test_apk_updates; then
-    trace "there is not a new alpine image, but there are apk updates"
-    rebuild_apk=true
+  if ! $first_build_base; then
+    trace "testing whether there is a new alpine image"
+    if fresh_base_layers alpine $registry/caddy-base; then
+      trace "there is a new alpine image (old=$old_alpine_version, new=$alpine_version)"
+      rebuild_base=true
+    elif ! test_apk_updates; then
+      trace "there is not a new alpine image, but there are apk updates"
+      rebuild_apk=true
+    fi
   fi
 fi
 
-if $first_build_base || $rebuild_base || $rebuild_apk; then
+build_base() {
+  $force_build_base || $first_build_base || $rebuild_base || $rebuild_apk
+}
+
+if build_base; then
   trace "building and pushing $registry/caddy-base"
   docker build --no-cache --tag $registry/caddy-base \
     --label org.opencontainers.image.created="$create_date" \
@@ -107,7 +133,7 @@ docker rm $new_caddy_exe_container_id
 golang_version="$(docker run --rm -i $registry/caddy-exe go version | awk '{print $3}')"
 caddy_version="$(docker run --rm -i $registry/caddy-exe caddy version | awk '{print $1}')"
 
-if ! $first_build_base && ! $rebuild_base && ! $rebuild_apk; then
+if ! build_base && ! $force_build_caddy; then
   trace "pulling $registry/caddy to compare caddy executables"
   if ! docker pull --quiet $registry/caddy; then
     trace "$registry/caddy not found"
@@ -135,6 +161,10 @@ if ! $first_build_base && ! $rebuild_base && ! $rebuild_apk; then
   fi
 fi
 
+build_caddy() {
+  build_base || $force_build_caddy || $first_build_caddy || $rebuild_caddy || $rebuild_exe
+}
+
 # If needed, (re)build and push the final caddy image.
 
 show_versions() {
@@ -144,7 +174,7 @@ show_versions() {
   echo "  Caddy: $caddy_version"
 }
 
-if $first_build_base || $first_build_caddy || $rebuild_base || $rebuild_apk || $rebuild_caddy || $rebuild_exe; then
+if build_caddy; then
   trace "building and pushing $registry/caddy"
   docker build --tag $registry/caddy \
     --label org.opencontainers.image.created="$create_date" \
@@ -161,6 +191,8 @@ if $first_build_base || $first_build_caddy || $rebuild_base || $rebuild_apk || $
 
   show_versions
   echo "The caddy image was (re)built because:"
+  if $force_build_base; then echo "- A caddy-base build was explicitly requested"; fi
+  if $force_build_caddy; then echo "- A caddy build was explicitly requested"; fi
   if $first_build_base; then echo "- There wasn't an existing caddy-base image"; fi
   if $first_build_caddy; then echo "- There wasn't an existing caddy image"; fi
   if $rebuild_base; then echo "- Alpine Linux has a new release"; fi

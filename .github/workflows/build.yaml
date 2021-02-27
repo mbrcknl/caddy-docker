@@ -10,6 +10,9 @@ on:
   schedule:
     - cron: '7 17 * * *'
   workflow_dispatch:
+    inputs:
+      force-rebuild-image:
+        description: 'Image to rebuild'
 
 jobs:
   caddy-docker-image-build:
@@ -27,4 +30,6 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.CR_PAT }}
       - name: Build and push images
+        env:
+          INPUT_FORCE_BUILD_IMAGE: ${{ github.event.inputs.force-rebuild-image }}
         run: ./build.sh
