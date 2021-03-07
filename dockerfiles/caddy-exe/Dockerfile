@@ -12,4 +12,4 @@ RUN go get github.com/caddyserver/xcaddy/cmd/xcaddy
 RUN xcaddy build \
     --output /go/bin/caddy \
     --with github.com/mbrcknl/caddy_yaml_adapter \
-    --with github.com/caddy-dns/cloudflare
+    --with github.com/mbrcknl/caddy_dns_cloudflare
