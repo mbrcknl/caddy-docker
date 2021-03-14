@@ -8,7 +8,6 @@ set -euo pipefail
 registry=ghcr.io/mbrcknl
 
 export DOCKER_BUILDKIT=1
-export XCADDY_SKIP_CLEANUP=1
 
 create_date=$(date -u "+%FT%TZ")
 current_revision=$(git rev-parse --verify HEAD)
@@ -89,7 +88,7 @@ if ! $force_build_base; then
        && (apk list --installed | sort > /tmp/1) \
        && apk upgrade \
        && (apk list --installed | sort > /tmp/2) \
-       && diff -U 0 -L "old packages" /tmp/1 -L "new packages" /tmp/2'
+       && diff -U 0 -L "old/packages" /tmp/1 -L "new/packages" /tmp/2'
   }
 
   if ! $first_build_base; then
@@ -126,12 +125,28 @@ fi
 
 trace "unconditionally building a new caddy executable"
 
+get_caddy_golang_version() {
+  local caddy_exe
+  caddy_exe="$1"
+  if ! (docker run --rm -i -v "$PWD/$caddy_exe":/caddy golang:alpine go version /caddy | awk '{print $2}'); then
+    echo unknown
+  fi
+}
+
+get_caddy_version() {
+  local caddy_img
+  caddy_img="$1"
+  if ! (docker run --rm -i "$registry/$caddy_img" /caddy/caddy version | awk '{print $1}'); then
+    echo unknown
+  fi
+}
+
 docker build --no-cache --pull --tag $registry/caddy-exe dockerfiles/caddy-exe
-new_caddy_exe_container_id=$(docker create $registry/caddy-exe /caddy)
-docker cp $new_caddy_exe_container_id:/go/bin/caddy dockerfiles/caddy/caddy
+new_caddy_exe_container_id=$(docker create $registry/caddy-exe /caddy/caddy)
+docker cp $new_caddy_exe_container_id:/caddy dockerfiles/caddy/caddy
 docker rm $new_caddy_exe_container_id
-golang_version="$(docker run --rm -i $registry/caddy-exe go version | awk '{print $3}')"
-caddy_version="$(docker run --rm -i $registry/caddy-exe caddy version | awk '{print $1}')"
+golang_version="$(get_caddy_golang_version dockerfiles/caddy/caddy/caddy)"
+caddy_version="$(get_caddy_version caddy-exe)"
 
 if ! build_base && ! $force_build_caddy; then
   trace "pulling $registry/caddy to compare caddy executables"
@@ -144,20 +159,21 @@ if ! build_base && ! $force_build_caddy; then
   else
     trace "comparing old and new caddy executables"
     old_caddy_exe_container_id=$(docker create $registry/caddy)
-    old_caddy_exe=dockerfiles/caddy/caddy-$old_caddy_exe_container_id
-    docker cp $old_caddy_exe_container_id:/bin/caddy $old_caddy_exe
+    old_caddy_exe=caddy-$old_caddy_exe_container_id
+    docker cp $old_caddy_exe_container_id:/caddy $old_caddy_exe
     docker rm $old_caddy_exe_container_id
-    old_golang_version=$(docker run --rm -i -v $PWD/$old_caddy_exe:/caddy $registry/caddy-exe go version /caddy | awk '{print $2}')
-    old_caddy_version=$(docker run --rm -i -v $PWD/$old_caddy_exe:/caddy $registry/caddy-exe /caddy version | awk '{print $1}')
-
-    if ! cmp dockerfiles/caddy/caddy-$old_caddy_exe_container_id dockerfiles/caddy/caddy; then
+    old_golang_version="$(get_caddy_golang_version $old_caddy_exe)"
+    old_caddy_version="$(get_caddy_version caddy)"
+    if ! cmp $old_caddy_exe/caddy dockerfiles/caddy/caddy/caddy; then
       trace "old and new caddy executables differ"
       trace "Go: $old_golang_version -> $golang_version"
       trace "Caddy: $old_caddy_version -> $caddy_version"
+      for file in go.mod go.sum; do
+        diff -U 0 -L old/$file $old_caddy_exe/$file -L new/$file dockerfiles/caddy/caddy/$file || true
+      done
       rebuild_exe=true
     fi
-
-    rm dockerfiles/caddy/caddy-$old_caddy_exe_container_id
+    rm -rf $old_caddy_exe
   fi
 fi
 
@@ -203,5 +219,3 @@ else
   show_versions
   echo "The caddy image was already up to date."
 fi
-
-rm dockerfiles/caddy/caddy

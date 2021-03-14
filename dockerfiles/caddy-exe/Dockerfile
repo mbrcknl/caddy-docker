@@ -3,13 +3,20 @@
 
 FROM golang:alpine AS caddy_builder
 
-RUN apk update \
-    && apk upgrade \
-    && apk add ca-certificates git
+COPY main.go /caddy/
 
-RUN go get github.com/caddyserver/xcaddy/cmd/xcaddy
+RUN apk update && apk upgrade && apk add ca-certificates git
 
-RUN xcaddy build \
-    --output /go/bin/caddy \
-    --with github.com/mbrcknl/caddy_yaml_adapter \
-    --with github.com/mbrcknl/caddy_dns_cloudflare
+ENV CGO_ENABLED=0
+
+RUN cd /caddy \
+    && go mod init main \
+    && go mod edit -replace github.com/caddyserver/caddy/v2@v2.3.0=github.com/mbrcknl/caddy/v2@mbrcknl-2.3.0
+
+RUN cd /caddy && go mod tidy
+RUN cd /caddy && go get -u ./...
+RUN cd /caddy && go build -o /caddy/caddy -ldflags "-w -s" -trimpath
+
+FROM scratch
+
+COPY --from=caddy_builder /caddy/caddy /caddy/go.mod /caddy/go.sum /caddy/
